@@ -2,13 +2,36 @@ use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
     process::{Command, Output},
+    sync::OnceLock,
 };
+
+static RESOURCE_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+pub(crate) fn configure_resources(directory: PathBuf) {
+    let _ = RESOURCE_DIR.set(directory);
+}
+
+fn packaged_binary(directory: &Path, name: &str) -> Option<PathBuf> {
+    let filename = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    };
+    let path = directory.join("runtime").join(filename);
+    path.is_file().then_some(path)
+}
 
 pub(crate) fn binary(name: &str) -> PathBuf {
     if let Some(path) = std::env::var_os(format!("RUSTYBROS_{}", name.to_uppercase())) {
         return path.into();
     }
-    // npm supplies local development binaries; production packaging is RB13.
+    if let Some(path) = RESOURCE_DIR
+        .get()
+        .and_then(|directory| packaged_binary(directory, name))
+    {
+        return path;
+    }
+    // npm supplies local binaries for development and standalone Rust tests.
     if cfg!(debug_assertions) {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         let relative = match (name, std::env::consts::OS) {
@@ -17,7 +40,14 @@ pub(crate) fn binary(name: &str) -> PathBuf {
             ("ffprobe", "windows") => {
                 "node_modules/ffprobe-static/bin/win32/x64/ffprobe.exe".to_owned()
             }
-            ("ffprobe", "macos") => "node_modules/ffprobe-static/bin/darwin/x64/ffprobe".to_owned(),
+            ("ffprobe", "macos") => format!(
+                "node_modules/ffprobe-static/bin/darwin/{}/ffprobe",
+                if cfg!(target_arch = "aarch64") {
+                    "arm64"
+                } else {
+                    "x64"
+                }
+            ),
             _ => "node_modules/ffprobe-static/bin/linux/x64/ffprobe".to_owned(),
         };
         let local = root.join(relative);

@@ -1,6 +1,6 @@
 # RustyBros
 
-Editor de video de escritorio y juego de plataformas: **RB1 a RB12** del proyecto Tauri + Rust + Phaser 3. Interfaz en español con React, TypeScript y Vite; procesamiento real de video mediante FFmpeg, invocado exclusivamente desde Rust.
+Editor de video de escritorio y juego de plataformas: **RB1 a RB14** del proyecto Tauri + Rust + Phaser 3. Interfaz en español con React, TypeScript y Vite; procesamiento real de video mediante FFmpeg, invocado exclusivamente desde Rust. Instalador de Windows generado y probado; configuración y workflow nativo de Linux/macOS preparados, pendientes de ejecución en esos sistemas.
 
 ## Funcionalidades
 
@@ -17,10 +17,24 @@ Editor de video de escritorio y juego de plataformas: **RB1 a RB12** del proyect
 - **RB10:** Rust emite `filter-applied` y `video-exported` solamente después de completar cada operación. Aplicar efectos otorga 100 puntos, una moneda y ocho segundos de escudo; exportar otorga 500 puntos, cinco monedas y quince segundos. Los premios llegan al HUD también con el juego en pausa o antes de iniciarlo. Se ignoran eventos repetidos e inválidos. Previsualizar solamente el recorte, cancelar el selector o un procesamiento fallido no otorga premios.
 - **RB11:** el juego publica su progreso mediante IPC; Rust emite `game-progress` y el editor muestra un panel de logros con nivel, estado de la partida, puntaje, vidas, monedas y tiempo. Incluye mejor puntaje, victorias y monedas recogidas entre partidas. Seis logros: primera moneda, diez monedas acumuladas, primer enemigo vencido, posta intermedia, primera victoria y victoria con tres vidas. Se desbloquean una sola vez y se conservan al reiniciar el nivel.
 - **RB12:** `GameStateStore(pub Mutex<GameState>)`, registrado en Tauri con los commands `get_game_state` y `update_game_state`. Rust conserva el progreso, estadísticas, logros y registro de premios. La interfaz consulta el estado al cargar, envía los cambios del juego y escucha las actualizaciones del backend. Los trabajos de video acreditan sus premios bajo el mismo bloqueo para evitar que una actualización del juego los sobrescriba.
+- **RB13:** empaquetado activado con `npm run tauri -- build`. Windows genera un instalador NSIS `.exe`, con WebView2, FFmpeg, FFprobe, iconos y avisos de componentes incluidos. Linux está configurado para `.deb`/`.AppImage` y macOS para `.app`/`.dmg` en Intel y Apple Silicon. El workflow manual de GitHub Actions ejecuta cada compilación en su sistema nativo; los paquetes de Linux/macOS todavía no fueron generados ni probados desde este equipo Windows.
+- **RB14:** el instalador de Windows ofrece ejecutar RustyBros al finalizar y crea el acceso de Inicio. El punto de entrada abre directamente la ventana del editor con su juego embebido. La aplicación instalada funciona sin repositorio, Vite, Node.js, Rust ni FFmpeg en PATH. Instalación, procesamiento de video, juego y desinstalación comprobados con el paquete release real.
 
 La exportación usa una copia de los ajustes al iniciarla: cambiar el editor después no altera ese trabajo. Se permite una exportación a la vez y el juego sigue disponible durante el procesamiento. Los videos importados están protegidos contra reemplazo. El resultado se procesa en un temporal de la carpeta elegida y se publica al finalizar; si falla, se elimina el temporal y se conserva cualquier archivo de destino anterior. Cancelar el selector no inicia una exportación. La cancelación de una exportación que ya comenzó no está incluida.
 
-Los requisitos RB13 y RB14 quedan para próximas etapas: empaquetado e instaladores. Los logros, récords y recompensas se mantienen en memoria mientras el proceso de la aplicación siga abierto, incluso al reiniciar el nivel o recargar la ventana. No hay guardado en disco: cerrar y volver a abrir la aplicación inicia una sesión nueva. Recargar la ventana comienza un nivel nuevo, conservando los logros, estadísticas, premios y duración restante del escudo; no restaura la posición del personaje. Los escudos no se acumulan ni acortan uno más largo: se conserva la mayor duración restante. Bloquean un choque lateral y vencen al enemigo, pero no evitan caídas ni el límite de tiempo.
+Los logros, récords y recompensas se mantienen en memoria mientras el proceso de la aplicación siga abierto, incluso al reiniciar el nivel o recargar la ventana. No hay guardado en disco: cerrar y volver a abrir la aplicación inicia una sesión nueva. Recargar la ventana comienza un nivel nuevo, conservando los logros, estadísticas, premios y duración restante del escudo; no restaura la posición del personaje. Los escudos no se acumulan ni acortan uno más largo: se conserva la mayor duración restante. Bloquean un choque lateral y vencen al enemigo, pero no evitan caídas ni el límite de tiempo.
+
+## Instalar o generar la entrega
+
+El instalador de Windows se encuentra en `artifacts/RustyBros_0.1.0_x64-setup.exe` después de recolectar la compilación. La carpeta incluye `SHA256SUMS.txt`, información de la compilación, instrucciones y avisos de terceros. El paquete no tiene firma de editor.
+
+```powershell
+npm run tauri -- build
+npm run collect:artifacts
+npm run test:installer
+```
+
+La prueba instala una copia temporal sin reemplazar instalaciones existentes, comprueba el editor/juego y el procesamiento con las herramientas del paquete, y desinstala esa copia. El instalador original queda disponible. Para Linux/macOS, usar el workflow manual **Instaladores de escritorio** tras incorporar estos cambios al repositorio; todavía no se ejecutó ni se publicaron releases. Instrucciones completas y requisitos por sistema: [distribución e instalación](docs/DISTRIBUTION.md).
 
 ## Ejecutar
 
@@ -31,7 +45,7 @@ npm run tauri dev
 
 La primera compilación descarga los crates de Rust y puede demorar varios minutos. Se necesita Node.js 22, Rust estable y las herramientas de compilación de Tauri para el sistema operativo. En Windows también se requiere WebView2. Esta carpeta puede usar una instalación portátil en `.tools/` de Rust GNU + LLVM-MinGW: el lanzador la detecta automáticamente y configura el entorno solamente para su proceso. Si `.tools/` no está presente, usa Rust y el compilador del sistema. Para Windows con Rust MSVC se necesitan Visual Studio Build Tools con «Desarrollo para el escritorio con C++» y Windows SDK.
 
-`npm install` descarga FFmpeg y FFprobe como dependencias de desarrollo locales. Se puede usar una instalación propia mediante `RUSTYBROS_FFMPEG` y `RUSTYBROS_FFPROBE` (rutas a los ejecutables); sin binarios locales se buscan en `PATH`. No se genera instalador en esta etapa. Para distribuir posteriormente se deberá empaquetar FFmpeg y revisar sus licencias (incluida la variante GPL de ffmpeg-static).
+`npm install` descarga FFmpeg y FFprobe como dependencias de desarrollo locales. La preparación del instalador los copia a los recursos de la aplicación junto a versiones, SHA-256 y licencias; Rust los resuelve por la ruta de recursos de Tauri. Se puede usar una instalación propia mediante `RUSTYBROS_FFMPEG` y `RUSTYBROS_FFPROBE` (rutas a los ejecutables). El modo de desarrollo y las pruebas Rust también admiten binarios de npm y `PATH`. Los avisos y procedencia se incluyen en el paquete; consultar [componentes de terceros](docs/THIRD_PARTY_NOTICES.md) y las condiciones de acceso a sus fuentes antes de redistribuir públicamente los binarios GPL.
 
 ```powershell
 npm run dev      # interfaz y juego en navegador; importación/exportación requieren Tauri
@@ -88,6 +102,12 @@ src-tauri/capabilities/    Permiso mínimo para el selector nativo
 scripts/tauri.mjs          Lanzador con soporte de herramientas portátiles
 scripts/test-game.mjs      Prueba del HUD y recorrido con la física real de Phaser
 scripts/test-native-game.mjs Prueba de juego/editor/estado en WebView2 real
+scripts/prepare-bundle.mjs Binarios multimedia nativos, licencias y manifiesto
+scripts/prepare-notices.mjs Avisos de crates Rust después de compilar
+scripts/collect-artifacts.mjs Instaladores, SHA-256 y documentación de entrega
+scripts/test-installer.mjs Instalación, arranque y desinstalación con entorno limpio
+src-tauri/tauri.*.conf.json Configuración de instaladores por sistema operativo
+.github/workflows/desktop-packages.yml Compilación nativa manual de cuatro destinos
 ```
 
 Las tareas pesadas se ejecutan con `spawn_blocking`, sin bloquear la ventana. Los efectos aceptan una lista cerrada de filtros: no se ejecutan comandos de shell ni filtros arbitrarios enviados por la interfaz. Rust valida archivo, extensión, existencia de video, duración y límites de recorte. Solamente los archivos importados pueden procesarse; se autoriza explícitamente cada vista previa para el protocolo de archivos de Tauri. Los resultados temporales se guardan en la caché de la aplicación y se limpian al iniciar la siguiente sesión.
@@ -122,8 +142,9 @@ El mutex se libera antes de emitir eventos o procesar video. No se ejecutan FFmp
 12. Recoger monedas, vencer un enemigo, activar la posta y ganar: el panel de logros debe mostrar cada avance. Diez monedas pueden acumularse entre partidas. Ganar con tres vidas desbloquea «Sin un rasguño».
 13. Reiniciar y recargar la ventana: comprobar que los logros, récords, estadísticas y premios siguen presentes, con el nivel preparado nuevamente. Cerrar completamente y volver a abrir inicia una sesión nueva.
 14. Jugar mientras se procesa un efecto o una exportación. Comparar el HUD con el progreso del editor: los premios deben sumarse sin borrar las monedas recogidas. En pausa no deben avanzar el reloj ni el escudo.
+15. Ejecutar el instalador de Windows y abrir desde su pantalla final o el menú Inicio. Confirmar que aparece el editor y el juego en la misma ventana. Importar y exportar sin herramientas de desarrollo en PATH. Desinstalar sin modificar videos originales ni exportaciones.
 
-Los commits de RB1–RB10 fueron realizados por el usuario. Los cambios de RB11–RB12 se dejan sin commit.
+Los commits de RB1–RB12 fueron realizados por el usuario. Los cambios de RB13–RB14 se dejan sin commit.
 
 ## Verificación realizada
 
@@ -141,8 +162,11 @@ Los commits de RB1–RB10 fueron realizados por el usuario. Los cambios de RB11�
 - WebView2 real: premios después de procesar efectos y exportar, sin premios por recorte solo, fallos ni eventos repetidos; reloj/escudo congelados en pausa y premios conservados al reiniciar.
 - Estado compartido: contrato JSON, revisiones y secuencias, validación sin mutación en fallos, seis logros sin duplicados, conservación entre partidas y 200 recompensas desde ocho hilos concurrentes junto con actualizaciones del juego.
 - WebView2 real: moneda de Phaser → command Rust → evento `game-progress` → panel de logros; exportación real mientras el juego avanza, seis logros, récord, victoria única, reinicio y recarga conservando los datos de la sesión.
+- Instalador release NSIS de Windows x64: instalación en carpeta con espacios, acceso de Inicio, manifiesto y huellas de FFmpeg/FFprobe, arranque desde otra carpeta con PATH mínimo, importación/efectos/exportación reales y comprobación del juego/logros, seguido de desinstalación de la copia de prueba.
+- Workflow de Windows, Linux y macOS Intel/ARM validado con actionlint. La validación de configuración no sustituye compilar y probar los paquetes de Linux/macOS, aún pendientes.
 
 Captura del HUD y las recompensas en la aplicación: [RB8–RB10](docs/rb8-rb10.png).
 Captura del panel de logros en la aplicación: [RB11–RB12](docs/rb11-rb12.png).
+Captura del editor y juego de la aplicación instalada: [RB13–RB14](docs/rb13-rb14.png).
 
 Las pruebas de interacción usan selectores simulados en navegador y el evento de arrastre en Tauri. El procesamiento y los eventos de exportación de la prueba son reales. La selección dentro de los diálogos nativos se realiza manualmente.

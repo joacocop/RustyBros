@@ -5,11 +5,23 @@ import { existsSync } from "node:fs";
 import { chromium } from "playwright";
 import ffmpeg from "ffmpeg-static";
 import path from "node:path";
+import { parseArgs } from "node:util";
 import { root, env } from "./environment.mjs";
+import { cleanRuntimeEnvironment } from "./runtime-environment.mjs";
+
+const { values } = parseArgs({
+  options: {
+    executable: { type: "string" },
+    "clean-env": { type: "boolean" },
+    screenshot: { type: "string" },
+  },
+});
 
 if (process.platform !== "win32")
   throw new Error("Esta prueba usa el WebView2 de Windows.");
-const executable = path.join(root, "src-tauri/target/debug/rustybros.exe");
+const executable = values.executable
+  ? path.resolve(values.executable)
+  : path.join(root, "src-tauri/target/debug/rustybros.exe");
 if (!existsSync(executable))
   throw new Error(
     "Primero compilá con npm run tauri -- build --debug --no-bundle.",
@@ -49,9 +61,9 @@ try {
   if (!String(error).includes("fetch failed")) throw error;
 }
 const app = spawn(executable, [], {
-  cwd: root,
+  cwd: values["clean-env"] ? temporary : root,
   env: {
-    ...env,
+    ...(values["clean-env"] ? cleanRuntimeEnvironment() : env),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
   },
   windowsHide: true,
@@ -80,6 +92,9 @@ try {
   page.setDefaultTimeout(60000);
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  // CDP can attach while WebView2 is still navigating away from about:blank.
+  // Wait for the first real app load before injecting the next-load game capture.
+  await page.getByRole("button", { name: "Empezar aventura" }).waitFor();
   // Capture the real game instance without adding test hooks to production code.
   await page.addInitScript(() => {
     Object.defineProperty(window, "Phaser", {
@@ -100,8 +115,23 @@ try {
       },
     });
   });
-  await page.reload();
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Empezar aventura" }).waitFor();
+  await page.getByRole("heading", { name: "Dale tu propio ritmo." }).waitFor();
+  if (values["clean-env"]) {
+    assert.match(
+      page.url(),
+      /^(tauri:\/\/localhost|https?:\/\/tauri\.localhost)/,
+    );
+    if (values.screenshot)
+      await page.screenshot({
+        path: path.resolve(values.screenshot),
+        fullPage: true,
+      });
+    console.log(
+      "Inicio instalado: editor, juego embebido y recursos locales sin servidor ni herramientas en PATH OK.",
+    );
+  }
   await page.waitForFunction(
     () => !!window.__testGame?.scene.getScene("trail")?.player,
   );
@@ -267,9 +297,14 @@ try {
   assert.equal(state.statistics.collectedCoins, 24);
   assert.equal(state.statistics.defeated, 1);
   const wonScore = state.score;
-  await page
-    .locator("#achievements")
-    .screenshot({ path: path.join(root, "docs/rb11-rb12.png") });
+  await page.locator("#achievements").screenshot({
+    path: path.join(
+      root,
+      values["clean-env"]
+        ? "tmp/installed-achievements.png"
+        : "docs/rb11-rb12.png",
+    ),
+  });
   await page.getByRole("button", { name: "Reiniciar nivel" }).click();
   await page.evaluate(() => window.__step(30));
   await settled();
@@ -280,7 +315,7 @@ try {
   assert.equal(state.collectedCoins, 0);
   assert.equal(state.score, 600);
 
-  await page.reload();
+  await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Empezar aventura" }).waitFor();
   await settled();
   state = await shared();

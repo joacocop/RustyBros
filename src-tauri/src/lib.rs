@@ -14,6 +14,7 @@ pub fn run() {
         .manage(export::ExportState::default())
         .manage(game::GameStateStore::default())
         .setup(|app| {
+            processing::configure_resources(app.path().resource_dir()?);
             // Only preview files created in this session are exposed to the WebView.
             let cache = app.path().app_cache_dir()?.join("previews");
             std::fs::create_dir_all(&cache)?;
