@@ -11,50 +11,47 @@ import {
   Timer,
 } from "lucide-react";
 import { coinPositions, type LevelState } from "../game/level";
-import { clockLabel, initialLevel, type EditorReward } from "../game/rules";
-import { subscribeEditorRewards } from "../game/editorBridge";
+import { clockLabel, initialLevel } from "../game/rules";
+import { useGameSession } from "../game/GameSession";
+import { rewardSeed } from "../game/progress";
 
 type Controller = ReturnType<typeof import("../game/createGame").createGame>;
 
 export default function GamePanel() {
+  const { client, ready, error: syncError } = useGameSession();
   const host = useRef<HTMLDivElement>(null);
   const controller = useRef<Controller | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
-  const [bridgeError, setBridgeError] = useState("");
   const [state, setState] = useState<LevelState>(() =>
     initialLevel(coinPositions.length),
   );
   useEffect(() => {
+    if (!ready) return;
     let disposed = false;
     let cleanupRewards: (() => void) | undefined;
-    const pending: EditorReward[] = [];
-    subscribeEditorRewards((reward) => {
-      if (disposed) return;
-      if (controller.current) controller.current.reward(reward);
-      else pending.push(reward);
-    })
-      .then((cleanup) => {
-        if (disposed) cleanup();
-        else cleanupRewards = cleanup;
-      })
-      .catch((e) => {
-        if (!disposed)
-          setBridgeError(
-            `No se pudieron conectar las recompensas: ${String(e)}`,
-          );
-      });
     import("../game/createGame")
       .then(({ createGame }) => {
         if (disposed || !host.current) return;
-        controller.current = createGame(host.current, (next) => {
-          if (!disposed) {
-            setLoaded(true);
-            setState(next);
-          }
+        const shared = client.getSnapshot().state;
+        controller.current = createGame(
+          host.current,
+          (next) => {
+            if (!disposed) {
+              setLoaded(true);
+              setState(next);
+              client.publish(next);
+            }
+          },
+          rewardSeed(shared),
+        );
+        client.acknowledgeRewards(shared.rewardRevision);
+        cleanupRewards = client.subscribeRewards((snapshot) => {
+          if (disposed) return;
+          for (const reward of snapshot.rewards)
+            controller.current?.reward(reward);
+          client.acknowledgeRewards(snapshot.rewardRevision);
         });
-        for (const reward of pending.splice(0))
-          controller.current.reward(reward);
       })
       .catch((e) => {
         if (!disposed) setError(String(e));
@@ -65,7 +62,7 @@ export default function GamePanel() {
       controller.current?.destroy();
       controller.current = null;
     };
-  }, []);
+  }, [client, ready]);
 
   return (
     <section
@@ -119,9 +116,10 @@ export default function GamePanel() {
           </span>
         )}
       </div>
-      {bridgeError && (
+      {syncError && (
         <p className="game-bridge-error" role="alert">
-          {bridgeError}
+          El progreso está pendiente de sincronizar. Usá «Reintentar conexión»
+          en el panel de logros.
         </p>
       )}
       <div className="game-stage">
@@ -182,28 +180,33 @@ export default function GamePanel() {
         </div>
         {(!loaded || state.status !== "running") && (
           <div className="game-overlay">
-            {!loaded && !error ? (
+            {!loaded && !error && !syncError ? (
               <LoaderCircle className="spin" size={28} />
             ) : (
               <Gamepad2 size={30} />
             )}
             <h3>
-              {error
-                ? "No se pudo cargar el juego"
-                : !loaded
-                  ? "Preparando el sendero…"
-                  : state.status === "won"
-                    ? "¡Llegaste al último corte!"
-                    : state.status === "respawning"
-                      ? `Un respiro. Te quedan ${state.lives} vidas.`
-                      : state.status === "lost"
-                        ? "Sin vidas. Una nueva aventura."
-                        : state.status === "paused"
-                          ? "El sendero te espera."
-                          : "Una pequeña aventura entre cortes."}
+              {syncError && !ready
+                ? "No se pudo conectar el juego"
+                : error
+                  ? "No se pudo cargar el juego"
+                  : !loaded
+                    ? "Preparando el sendero…"
+                    : state.status === "won"
+                      ? "¡Llegaste al último corte!"
+                      : state.status === "respawning"
+                        ? `Un respiro. Te quedan ${state.lives} vidas.`
+                        : state.status === "lost"
+                          ? "Sin vidas. Una nueva aventura."
+                          : state.status === "paused"
+                            ? "El sendero te espera."
+                            : "Una pequeña aventura entre cortes."}
             </h3>
             <p>
               {error ||
+                (!ready && syncError
+                  ? "Reintentá la conexión desde el panel de logros para continuar."
+                  : "") ||
                 (state.status === "won"
                   ? `${state.score} puntos · ${state.collectedCoins}/${state.totalCoins} monedas del nivel · ${state.defeated} enemigos vencidos.`
                   : state.status === "respawning"

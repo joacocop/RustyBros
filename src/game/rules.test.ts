@@ -7,7 +7,6 @@ import {
   grantReward,
   initialLevel,
   loseLife,
-  parseEditorReward,
   resumeLife,
   RewardLedger,
   clockLabel,
@@ -109,24 +108,5 @@ describe("puntaje y recompensas de edición", () => {
     );
     expect(next.status).toBe("paused");
     expect(next.shieldSeconds).toBe(12);
-  });
-  it("valida los eventos: un recorte sin efectos y los datos inválidos no dan premios", () => {
-    expect(
-      parseEditorReward("effect", { id, duration: 2, effectsCount: 2 }),
-    ).toEqual({ id, kind: "effect" });
-    for (const payload of [
-      null,
-      {},
-      { id, duration: 0, effectsCount: 1 },
-      { id, duration: 2, effectsCount: 0 },
-      { id, duration: 2, effectsCount: 7 },
-      { id: "incorrecto", duration: 2, effectsCount: 1 },
-    ])
-      expect(parseEditorReward("effect", payload)).toBeNull();
-    expect(parseEditorReward("export", { id, duration: 3 })).toEqual({
-      id,
-      kind: "export",
-    });
-    expect(parseEditorReward("export", { id, duration: Infinity })).toBeNull();
   });
 });

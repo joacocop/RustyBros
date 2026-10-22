@@ -10,7 +10,8 @@
     "tauri": "node scripts/tauri.mjs",
     "test": "vitest run",
     "test:game": "node scripts/test-game.mjs",
-    "test:rust": "npm run build && node scripts/cargo.mjs test --features custom-protocol --test processing --test exporting -- --include-ignored"
+    "test:native-game": "node scripts/test-native-game.mjs",
+    "test:rust": "npm run build && node scripts/cargo.mjs test --features custom-protocol --test processing --test exporting --test game_state -- --include-ignored"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

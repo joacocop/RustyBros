@@ -1,47 +1,28 @@
-import { beforeEach, expect, it, vi } from "vitest";
-const mock = vi.hoisted(() => ({ native: true, listen: vi.fn() }));
-vi.mock("@tauri-apps/api/core", () => ({ isTauri: () => mock.native }));
+import { expect, it, vi } from "vitest";
+const mock = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: mock.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mock.listen }));
-import { subscribeEditorRewards } from "./editorBridge";
+import { nativeGameTransport } from "./editorBridge";
+import { emptySharedState } from "./progress";
 
-beforeEach(() => {
-  mock.native = true;
-  mock.listen.mockReset();
-});
-it("conecta ambos eventos y libera sus listeners al cerrar el juego", async () => {
-  const first = vi.fn(),
-    second = vi.fn();
-  const receive = vi.fn();
-  mock.listen.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
-  const cleanup = await subscribeEditorRewards(receive);
-  expect(mock.listen.mock.calls.map((call) => call[0])).toEqual([
-    "filter-applied",
-    "video-exported",
+it("consulta y actualiza el estado a través de los commands de Rust", async () => {
+  const state = emptySharedState();
+  mock.invoke.mockResolvedValue(state);
+  expect(await nativeGameTransport.load()).toBe(state);
+  const update = { action: "startRun" as const, runId: "run" };
+  expect(await nativeGameTransport.update(update)).toBe(state);
+  expect(mock.invoke.mock.calls).toEqual([
+    ["get_game_state"],
+    ["update_game_state", { update }],
   ]);
-  mock.listen.mock.calls[0][1]({
-    payload: {
-      id: "6fba8292-c3c7-4e3c-8dbd-0bcd71acb743",
-      duration: 1,
-      effectsCount: 1,
-    },
-  });
-  mock.listen.mock.calls[0][1]({ payload: { id: "incorrecto", duration: 1 } });
-  expect(receive).toHaveBeenCalledTimes(1);
-  cleanup();
-  expect(first).toHaveBeenCalledOnce();
-  expect(second).toHaveBeenCalledOnce();
 });
-it("limpia una conexión parcial si falla el segundo listener", async () => {
-  const first = vi.fn();
-  mock.listen
-    .mockResolvedValueOnce(first)
-    .mockRejectedValueOnce(new Error("sin conexión"));
-  await expect(subscribeEditorRewards(vi.fn())).rejects.toThrow("sin conexión");
-  expect(first).toHaveBeenCalledOnce();
-});
-it("mantiene el juego disponible en navegador sin invocar IPC", async () => {
-  mock.native = false;
-  const cleanup = await subscribeEditorRewards(vi.fn());
-  cleanup();
-  expect(mock.listen).not.toHaveBeenCalled();
+it("lleva game-progress al editor y devuelve la limpieza del listener", async () => {
+  const cleanup = vi.fn();
+  const receive = vi.fn();
+  mock.listen.mockResolvedValue(cleanup);
+  expect(await nativeGameTransport.listen(receive)).toBe(cleanup);
+  expect(mock.listen.mock.calls[0][0]).toBe("game-progress");
+  const state = emptySharedState();
+  mock.listen.mock.calls[0][1]({ payload: state });
+  expect(receive).toHaveBeenCalledWith(state);
 });

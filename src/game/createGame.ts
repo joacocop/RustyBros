@@ -21,11 +21,14 @@ import { createScenery } from "./scenery";
 export function createGame(
   host: HTMLDivElement,
   onState: (state: LevelState) => void,
+  seed: { rewards?: EditorReward[]; shieldSeconds?: number } = {},
 ) {
   let activeScene: TrailScene | undefined;
   let focused = false;
-  let retainedShield = 0;
+  let retainedShield = seed.shieldSeconds ?? 0;
+  let run = 0;
   const rewards = new RewardLedger();
+  for (const reward of seed.rewards ?? []) rewards.accept(reward);
 
   class TrailScene extends Phaser.Scene {
     player!: Phaser.Physics.Arcade.Sprite;
@@ -53,6 +56,7 @@ export function createGame(
         retainedShield,
         focused ? "running" : "ready",
       );
+      this.state.run = ++run;
       this.runClock = 0;
       this.jumpBufferedUntil = 0;
       this.lastGroundedAt = -Infinity;

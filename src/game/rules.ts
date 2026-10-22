@@ -13,12 +13,14 @@ export type GameStatus =
   "ready" | "running" | "paused" | "respawning" | "lost" | "won";
 export type DeathReason = "enemy" | "fall" | "timeout";
 export type LevelState = {
+  run: number;
   status: GameStatus;
   score: number;
   lives: number;
   coins: number;
   collectedCoins: number;
   bonusCoins: number;
+  bonusScore: number;
   totalCoins: number;
   defeated: number;
   timeLeft: number;
@@ -32,33 +34,6 @@ const REWARDS = {
   effect: { points: 100, coins: 1, shieldSeconds: 8 },
   export: { points: 500, coins: 5, shieldSeconds: 15 },
 } as const;
-
-export function parseEditorReward(
-  kind: RewardKind,
-  payload: unknown,
-): EditorReward | null {
-  if (!payload || typeof payload !== "object") return null;
-  const value = payload as Record<string, unknown>;
-  if (
-    typeof value.id !== "string" ||
-    !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.id)
-  )
-    return null;
-  if (
-    typeof value.duration !== "number" ||
-    !Number.isFinite(value.duration) ||
-    value.duration <= 0
-  )
-    return null;
-  if (
-    kind === "effect" &&
-    (!Number.isInteger(value.effectsCount) ||
-      Number(value.effectsCount) < 1 ||
-      Number(value.effectsCount) > 6)
-  )
-    return null;
-  return { kind, id: value.id };
-}
 
 // The ledger survives level restarts, but is scoped to this application session.
 export class RewardLedger {
@@ -86,12 +61,14 @@ export function initialLevel(
   status: GameStatus = "ready",
 ): LevelState {
   return {
+    run: 0,
     status,
     score: rewards.score,
     lives: STARTING_LIVES,
     coins: rewards.coins,
     collectedCoins: 0,
     bonusCoins: rewards.coins,
+    bonusScore: rewards.score,
     totalCoins,
     defeated: 0,
     timeLeft: LIFE_SECONDS,
@@ -126,6 +103,7 @@ export function grantReward(state: LevelState, grant: RewardGrant): LevelState {
     score: state.score + grant.points,
     coins: state.coins + grant.coins,
     bonusCoins: state.bonusCoins + grant.coins,
+    bonusScore: state.bonusScore + grant.points,
     shieldSeconds: Math.max(state.shieldSeconds, grant.shieldSeconds),
     lastReward: grant,
   };

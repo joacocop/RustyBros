@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import ExportPanel from "./components/ExportPanel";
 import GamePanel from "./components/GamePanel";
+import AchievementsPanel from "./components/AchievementsPanel";
 import {
   ArrowDownToLine,
   ArrowUpRight,
@@ -334,7 +335,7 @@ export default function App() {
           <span>Sin título</span>
         </div>
         <span className="build-tag">
-          EDITÁ Y JUGÁ <span>01—10</span>
+          EDITÁ Y JUGÁ <span>01—12</span>
         </span>
       </header>
 
@@ -836,6 +837,7 @@ export default function App() {
             busy={!!busy}
           />
         </div>
+        <AchievementsPanel />
         <GamePanel />
         <footer>
           <span className="footer-notice" role="status">
