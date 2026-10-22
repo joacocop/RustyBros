@@ -1,30 +1,44 @@
 import Phaser from "phaser";
+import { coinPositions, enemyRoutes, WORLD_HEIGHT, WORLD_WIDTH } from "./level";
 import {
-  coinPositions,
-  enemyRoutes,
-  platforms,
-  WORLD_HEIGHT,
-  WORLD_WIDTH,
+  advanceClock,
+  collectCoin,
+  defeatEnemy,
+  finishLevel,
+  grantReward,
+  initialLevel,
+  loseLife,
+  resumeLife,
+  RewardLedger,
+  type DeathReason,
+  type EditorReward,
   type LevelState,
-} from "./level";
+  type RewardGrant,
+} from "./rules";
+import { createSpriteAnimations } from "./textures";
+import { createScenery } from "./scenery";
 
 export function createGame(
   host: HTMLDivElement,
   onState: (state: LevelState) => void,
 ) {
-  let activeScene: TrailScene;
+  let activeScene: TrailScene | undefined;
   let focused = false;
+  let retainedShield = 0;
+  const rewards = new RewardLedger();
 
   class TrailScene extends Phaser.Scene {
     player!: Phaser.Physics.Arcade.Sprite;
     enemies!: Phaser.Physics.Arcade.Group;
+    coins!: Phaser.Physics.Arcade.StaticGroup;
     keys!: Record<string, Phaser.Input.Keyboard.Key>;
-    state: LevelState = {
-      status: "ready",
-      coins: 0,
-      totalCoins: coinPositions.length,
-      defeated: 0,
-    };
+    shield!: Phaser.GameObjects.Arc;
+    checkpointFlag!: Phaser.GameObjects.Triangle;
+    state = initialLevel(coinPositions.length);
+    runClock = 0;
+    jumpBufferedUntil = 0;
+    lastGroundedAt = -Infinity;
+    graceSeconds = 0;
     constructor() {
       super("trail");
     }
@@ -33,75 +47,52 @@ export function createGame(
     }
     create() {
       activeScene = this;
-      this.state = {
-        status: focused ? "running" : "ready",
-        coins: 0,
-        totalCoins: coinPositions.length,
-        defeated: 0,
-      };
+      this.state = initialLevel(
+        coinPositions.length,
+        rewards,
+        retainedShield,
+        focused ? "running" : "ready",
+      );
+      this.runClock = 0;
+      this.jumpBufferedUntil = 0;
+      this.lastGroundedAt = -Infinity;
+      this.graceSeconds = 0;
       this.cameras.main.setBackgroundColor("#182e32");
       this.physics.world.setBounds(0, -200, WORLD_WIDTH, WORLD_HEIGHT + 500);
       this.cameras.main.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-      const art = this.add.graphics();
-      // Distant mountains and woodland are drawn locally; the game needs no remote assets.
-      art.fillStyle(0x284345);
-      art.fillTriangle(0, 360, 220, 110, 440, 360);
-      art.fillTriangle(330, 360, 560, 170, 790, 360);
-      art.fillTriangle(680, 360, 880, 100, 1100, 360);
-      art.setScrollFactor(0.15);
-      this.add.circle(765, 95, 38, 0xeac4a0).setScrollFactor(0.05);
-      for (let x = 60; x < WORLD_WIDTH; x += 180) {
-        const trees = this.add.graphics().setScrollFactor(0.55);
-        trees.fillStyle(0x233d38);
-        trees.fillRect(x + 22, 275, 14, 140);
-        trees.fillTriangle(x - 20, 330, x + 29, 160 + (x % 40), x + 80, 330);
-      }
-      if (!this.textures.exists("runner")) this.makeTextures();
-      const solid = this.physics.add.staticGroup();
-      for (const p of platforms) {
-        const block = this.add
-          .rectangle(p.x, p.y, p.width, p.height, 0x394b3d)
-          .setOrigin(0);
-        this.physics.add.existing(block, true);
-        solid.add(block);
-        this.add.rectangle(p.x, p.y, p.width, 7, 0xa3af78).setOrigin(0);
-        for (let tile = p.x + 10; tile < p.x + p.width; tile += 32)
-          this.add.rectangle(tile, p.y + 18, 13, 4, 0x516148).setOrigin(0);
-      }
+      const { solid, checkpoint } = createScenery(this);
+      this.checkpointFlag = checkpoint;
+      createSpriteAnimations(this);
       this.player = this.physics.add.sprite(72, 380, "runner");
-      this.player.setSize(22, 34).setOffset(5, 6).setMaxVelocity(280, 650);
+      this.player
+        .setSize(22, 34)
+        .setOffset(5, 6)
+        .setMaxVelocity(230, 650)
+        .setCollideWorldBounds(true)
+        .play("runner-idle");
       this.physics.add.collider(this.player, solid);
       this.cameras.main.startFollow(this.player, true, 0.12, 0.12, -160, 0);
-      const coins = this.physics.add.staticGroup();
+      this.shield = this.add
+        .circle(72, 380, 26, 0xb9d9c1, 0.08)
+        .setStrokeStyle(2, 0xc5ddb4)
+        .setDepth(3)
+        .setVisible(this.state.shieldSeconds > 0);
+      this.coins = this.physics.add.staticGroup();
       for (const [x, y] of coinPositions) {
-        const coin = coins.create(x, y, "coin") as Phaser.Physics.Arcade.Sprite;
-        coin.setCircle(9, 1, 1);
-        this.tweens.add({
-          targets: coin,
-          y: y - 5,
-          duration: 650,
-          yoyo: true,
-          repeat: -1,
-        });
+        const coin = this.coins.create(
+          x,
+          y,
+          "coin",
+        ) as Phaser.Physics.Arcade.Sprite;
+        coin.setCircle(9, 1, 1).play("coin-spin");
       }
-      this.physics.add.overlap(this.player, coins, (_player, item) => {
+      this.physics.add.overlap(this.player, this.coins, (_player, item) => {
         const coin = item as Phaser.Physics.Arcade.Sprite;
-        if (!coin.active) return;
+        if (!coin.active || this.state.status !== "running") return;
         coin.disableBody(true, true);
-        this.state.coins += 1;
+        this.state = collectCoin(this.state);
         this.publish();
-        const text = this.add.text(coin.x - 10, coin.y - 20, "+1", {
-          fontFamily: "monospace",
-          fontSize: "16px",
-          color: "#ffe1a2",
-        });
-        this.tweens.add({
-          targets: text,
-          y: text.y - 30,
-          alpha: 0,
-          duration: 600,
-          onComplete: () => text.destroy(),
-        });
+        this.floating("+100 · +1 moneda", coin.x, coin.y - 20);
       });
       this.enemies = this.physics.add.group();
       for (const route of enemyRoutes) {
@@ -114,42 +105,33 @@ export function createGame(
           .setSize(28, 20)
           .setOffset(2, 8)
           .setVelocityX(65)
-          .setData("route", route);
+          .setData("route", route)
+          .play("bug-walk");
       }
       this.physics.add.collider(this.enemies, solid);
-      this.physics.add.collider(this.player, this.enemies, (_p, item) => {
+      this.physics.add.collider(this.player, this.enemies, (_player, item) => {
         const enemy = item as Phaser.Physics.Arcade.Sprite;
+        if (this.state.status !== "running" || !enemy.active) return;
         const body = this.player.body as Phaser.Physics.Arcade.Body;
-        if (
+        const stomp =
           body.touching.down &&
-          (enemy.body as Phaser.Physics.Arcade.Body).touching.up
-        ) {
+          (enemy.body as Phaser.Physics.Arcade.Body).touching.up;
+        if (stomp || this.state.shieldSeconds > 0) {
           enemy.disableBody(true, true);
-          this.player.setVelocityY(-300);
-          this.state.defeated += 1;
+          this.state = defeatEnemy(this.state);
+          if (stomp) this.player.setVelocityY(-300);
+          else {
+            this.state.shieldSeconds = 0;
+            retainedShield = 0;
+            this.graceSeconds = 1.2;
+          }
+          this.floating(
+            stomp ? "+200" : "¡Escudo! +200",
+            enemy.x,
+            enemy.y - 24,
+          );
           this.publish();
-        } else this.finish(false);
-      });
-      this.add.rectangle(3100, 338, 5, 156, 0xd7d9b7);
-      const flag = this.add
-        .triangle(3104, 264, 0, 0, 66, 20, 0, 42, 0xec9b78)
-        .setOrigin(0);
-      this.tweens.add({
-        targets: flag,
-        scaleX: 0.9,
-        yoyo: true,
-        repeat: -1,
-        duration: 800,
-      });
-      this.add.text(3010, 230, "ÚLTIMO CORTE", {
-        fontFamily: "monospace",
-        fontSize: "12px",
-        color: "#c5d2ba",
-      });
-      this.add.text(42, 300, "EL SENDERO DEL ÓXIDO", {
-        fontFamily: "monospace",
-        fontSize: "12px",
-        color: "#b6c4aa",
+        } else if (this.graceSeconds <= 0) this.hurt("enemy");
       });
       this.keys = this.input.keyboard!.addKeys({
         left: "LEFT",
@@ -163,80 +145,111 @@ export function createGame(
         pause: "P",
         escape: "ESC",
       }) as Record<string, Phaser.Input.Keyboard.Key>;
-      this.physics.world.pause();
-      if (focused) this.physics.world.resume();
+      for (const name of ["up", "w", "jump"]) {
+        this.keys[name].on("down", () => {
+          if (this.state.status === "running")
+            this.jumpBufferedUntil = this.runClock + 120;
+        });
+        this.keys[name].on("up", () => {
+          const body = this.player.body as Phaser.Physics.Arcade.Body;
+          if (this.state.status === "running" && body.velocity.y < -210)
+            this.player.setVelocityY(-210);
+        });
+      }
+      if (focused) {
+        this.physics.world.resume();
+        this.anims.resumeAll();
+      } else this.physics.world.pause();
+      this.events.once("shutdown", () => {
+        retainedShield = this.state.shieldSeconds;
+        if (activeScene === this) activeScene = undefined;
+      });
       this.publish();
     }
-    makeTextures() {
-      const g = this.make.graphics({ x: 0, y: 0 });
-      g.fillStyle(0x172a2b);
-      g.fillRect(7, 30, 8, 10);
-      g.fillRect(19, 30, 8, 10);
-      g.fillStyle(0xdb956f);
-      g.fillRect(8, 6, 20, 17);
-      g.fillStyle(0xf1c8a1);
-      g.fillRect(10, 10, 18, 11);
-      g.fillStyle(0x27302a);
-      g.fillRect(6, 4, 22, 7);
-      g.fillRect(23, 14, 3, 3);
-      g.fillStyle(0x9eaf83);
-      g.fillRect(6, 23, 23, 12);
-      g.fillStyle(0xe78d6e);
-      g.fillRect(5, 21, 25, 5);
-      g.fillRect(1, 24, 9, 5);
-      g.generateTexture("runner", 32, 40);
-      g.clear();
-      g.fillStyle(0x9e5948);
-      g.fillRect(2, 10, 28, 15);
-      g.fillStyle(0xd88c67);
-      g.fillRect(6, 4, 20, 17);
-      g.fillStyle(0x172a2b);
-      g.fillRect(6, 24, 7, 5);
-      g.fillRect(20, 24, 7, 5);
-      g.fillRect(9, 12, 4, 4);
-      g.fillRect(21, 12, 4, 4);
-      g.generateTexture("bug", 32, 30);
-      g.clear();
-      g.fillStyle(0xe2b96c);
-      g.fillCircle(10, 10, 9);
-      g.fillStyle(0xffdf99);
-      g.fillRect(8, 4, 4, 12);
-      g.generateTexture("coin", 20, 20);
-      g.destroy();
+    floating(label: string, x = this.player.x, y = this.player.y - 36) {
+      const text = this.add
+        .text(x - 10, y, label, {
+          fontFamily: "monospace",
+          fontSize: "12px",
+          color: "#ffe1a2",
+          backgroundColor: "#17302bcc",
+          padding: { x: 4, y: 3 },
+        })
+        .setDepth(5);
+      this.tweens.add({
+        targets: text,
+        y: y - 30,
+        alpha: 0,
+        duration: 1000,
+        onComplete: () => text.destroy(),
+      });
     }
-    finish(won: boolean) {
-      if (this.state.status !== "running") return;
-      this.player.setVelocity(0);
+    receiveReward(grant: RewardGrant) {
+      this.state = grantReward(this.state, grant);
+      retainedShield = this.state.shieldSeconds;
+      this.shield.setVisible(true).setPosition(this.player.x, this.player.y);
+      this.floating(
+        `+${grant.points} · +${grant.coins} moneda${grant.coins > 1 ? "s" : ""} · Escudo`,
+      );
+      this.publish();
+    }
+    stopForLifeLoss() {
+      retainedShield = 0;
+      this.player.setVelocity(0).clearTint().setAlpha(1).play("runner-hurt");
+      this.shield.setVisible(false);
       this.physics.world.pause();
-      this.state.status = won ? "won" : "lost";
+      this.cameras.main.shake(160, 0.006);
+      this.input.keyboard?.resetKeys();
+      this.publish();
+    }
+    hurt(reason: DeathReason) {
+      if (this.state.status !== "running") return;
+      this.state = loseLife(this.state, reason);
+      this.stopForLifeLoss();
+    }
+    respawn() {
+      if (this.state.status !== "respawning") return;
+      this.state = resumeLife(this.state);
+      this.graceSeconds = 1.5;
+      this.jumpBufferedUntil = 0;
+      this.lastGroundedAt = -Infinity;
+      this.player.body!.reset(this.state.checkpoint ? 1580 : 72, 380);
+      this.player.setVelocity(0).setAlpha(1).clearTint().play("runner-idle");
+      this.physics.world.resume();
       this.publish();
     }
     setFocused(value: boolean) {
       focused = value;
-      if (this.state.status === "won" || this.state.status === "lost") return;
+      if (["won", "lost", "respawning"].includes(this.state.status)) return;
       this.state.status = value ? "running" : "paused";
-      if (value) this.physics.world.resume();
-      else {
+      if (value) {
+        this.physics.world.resume();
+        this.anims.resumeAll();
+      } else {
         this.player.setVelocityX(0);
         this.physics.world.pause();
+        this.anims.pauseAll();
         this.input.keyboard?.resetKeys();
+        this.jumpBufferedUntil = 0;
       }
       this.publish();
     }
-    update(time: number) {
-      if (!this.keys) return;
-      if (Phaser.Input.Keyboard.JustDown(this.keys.restart)) {
-        this.scene.restart();
+    update(_time: number, delta: number) {
+      if (!this.player || this.state.status !== "running") return;
+      const seconds = Math.min(delta, 100) / 1000;
+      this.runClock += seconds * 1000;
+      const oldTime = Math.ceil(this.state.timeLeft),
+        oldShield = Math.ceil(this.state.shieldSeconds);
+      this.state = advanceClock(this.state, seconds);
+      retainedShield = this.state.shieldSeconds;
+      if (this.state.status !== "running") {
+        this.stopForLifeLoss();
         return;
       }
-      if (
-        Phaser.Input.Keyboard.JustDown(this.keys.pause) ||
-        Phaser.Input.Keyboard.JustDown(this.keys.escape)
-      ) {
-        this.setFocused(this.state.status !== "running");
-      }
-      if (this.state.status !== "running") return;
+      this.graceSeconds = Math.max(0, this.graceSeconds - seconds);
       const body = this.player.body as Phaser.Physics.Arcade.Body;
+      const grounded = body.blocked.down || body.touching.down;
+      if (grounded) this.lastGroundedAt = this.runClock;
       const direction =
         this.keys.left.isDown || this.keys.a.isDown
           ? -1
@@ -245,17 +258,39 @@ export function createGame(
             : 0;
       this.player.setVelocityX(direction * 230);
       if (direction) this.player.setFlipX(direction < 0);
-      if (body.blocked.down || body.touching.down) {
-        if (
-          Phaser.Input.Keyboard.JustDown(this.keys.up) ||
-          Phaser.Input.Keyboard.JustDown(this.keys.w) ||
-          Phaser.Input.Keyboard.JustDown(this.keys.jump)
+      if (
+        ["up", "w", "jump"].some((name) =>
+          Phaser.Input.Keyboard.JustDown(this.keys[name]),
         )
-          this.player.setVelocityY(-490);
+      )
+        this.jumpBufferedUntil = this.runClock + 120;
+      if (
+        this.jumpBufferedUntil > 0 &&
+        this.runClock <= this.jumpBufferedUntil &&
+        this.runClock - this.lastGroundedAt <= 100
+      ) {
+        this.player.setVelocityY(-490);
+        this.jumpBufferedUntil = 0;
+        this.lastGroundedAt = -Infinity;
       }
-      this.player.setAngle(
-        direction && body.blocked.down ? Math.sin(time / 65) * 3 : 0,
-      );
+      const animation =
+        body.velocity.y < -20
+          ? "runner-jump"
+          : body.velocity.y > 20
+            ? "runner-fall"
+            : direction
+              ? "runner-run"
+              : "runner-idle";
+      this.player
+        .play(animation, true)
+        .setAlpha(
+          this.graceSeconds > 0 && Math.floor(this.graceSeconds * 10) % 2
+            ? 0.45
+            : 1,
+        );
+      this.shield
+        .setPosition(this.player.x, this.player.y)
+        .setVisible(this.state.shieldSeconds > 0);
       for (const object of this.enemies.getChildren()) {
         const enemy = object as Phaser.Physics.Arcade.Sprite;
         if (!enemy.active) continue;
@@ -266,10 +301,23 @@ export function createGame(
           (enemy.body as Phaser.Physics.Arcade.Body).velocity.x < 0,
         );
       }
-      if (this.player.y > WORLD_HEIGHT + 50 || this.player.x < -20)
-        this.finish(false);
-      else if (this.player.x >= 3080) this.finish(true);
-      if (this.player.x < 12) this.player.x = 12;
+      if (!this.state.checkpoint && this.player.x >= 1580 && grounded) {
+        this.state.checkpoint = true;
+        this.checkpointFlag.setFillStyle(0xec9b78);
+        this.floating("Posta activada");
+        this.publish();
+      }
+      if (this.player.y > WORLD_HEIGHT + 50) this.hurt("fall");
+      else if (this.player.x >= 3080) {
+        this.state = finishLevel(this.state);
+        this.player.setVelocity(0).play("runner-idle");
+        this.physics.world.pause();
+        this.publish();
+      } else if (
+        oldTime !== Math.ceil(this.state.timeLeft) ||
+        oldShield !== Math.ceil(this.state.shieldSeconds)
+      )
+        this.publish();
     }
   }
 
@@ -295,16 +343,44 @@ export function createGame(
   const visibility = () => {
     if (document.hidden) blur();
   };
+  const windowBlur = () => blur();
+  // Handle commands before Phaser queues the event: resetting held movement keys
+  // while pausing must not replay the same command on key-up.
+  const commandKey = (event: KeyboardEvent) => {
+    if (!["KeyP", "Escape", "KeyR"].includes(event.code)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (event.repeat || !activeScene) return;
+    if (event.code === "KeyR") {
+      focused = true;
+      activeScene.scene.restart();
+    } else activeScene.setFocused(activeScene.state.status !== "running");
+  };
   host.addEventListener("focus", focus);
   host.addEventListener("blur", blur);
   host.addEventListener("pointerdown", pointer);
   document.addEventListener("visibilitychange", visibility);
+  window.addEventListener("blur", windowBlur);
+  host.addEventListener("keydown", commandKey, true);
   return {
     game,
+    reward: (reward: EditorReward) => {
+      const grant = rewards.accept(reward);
+      if (!grant) return false;
+      if (activeScene?.sys.isActive()) activeScene.receiveReward(grant);
+      else retainedShield = Math.max(retainedShield, grant.shieldSeconds);
+      return true;
+    },
     restart: () => {
+      retainedShield = activeScene?.state.shieldSeconds ?? retainedShield;
       focused = true;
       host.focus({ preventScroll: true });
       activeScene?.scene.restart();
+    },
+    respawn: () => {
+      focused = true;
+      host.focus({ preventScroll: true });
+      activeScene?.respawn();
     },
     play: () => {
       host.focus({ preventScroll: true });
@@ -315,7 +391,9 @@ export function createGame(
       host.removeEventListener("focus", focus);
       host.removeEventListener("blur", blur);
       host.removeEventListener("pointerdown", pointer);
+      host.removeEventListener("keydown", commandKey, true);
       document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("blur", windowBlur);
       game.destroy(true);
     },
   };

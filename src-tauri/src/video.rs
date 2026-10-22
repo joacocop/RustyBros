@@ -202,6 +202,7 @@ pub async fn apply_effects(
         app.asset_protocol_scope()
             .allow_file(&output)
             .map_err(|e| e.to_string())?;
+        crate::editor_events::filter_applied(&app, end - start, effects.len());
         Ok(ProcessedPreview {
             path: output.to_string_lossy().into(),
             start,

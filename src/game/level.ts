@@ -47,10 +47,4 @@ export const enemyRoutes = [
   { x: 2020, left: 2000, right: 2050 },
   { x: 2940, left: 2900, right: 2990 },
 ];
-export type GameStatus = "ready" | "running" | "paused" | "lost" | "won";
-export type LevelState = {
-  status: GameStatus;
-  coins: number;
-  totalCoins: number;
-  defeated: number;
-};
+export type { GameStatus, LevelState } from "./rules";

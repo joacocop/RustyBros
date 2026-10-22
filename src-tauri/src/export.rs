@@ -158,6 +158,7 @@ pub async fn export_video(
             return Err(error);
         }
         emit(100.0, duration, "completed");
+        crate::editor_events::video_exported(&app, &request.job_id, duration);
         Ok(output.to_string_lossy().into_owned())
     })
     .await

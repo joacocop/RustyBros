@@ -1,3 +1,4 @@
+mod editor_events;
 mod encoding;
 mod export;
 mod processing;

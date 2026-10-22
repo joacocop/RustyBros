@@ -1,6 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { Gamepad2, LoaderCircle, Pause, Play, RotateCcw } from "lucide-react";
+import {
+  Coins,
+  Gamepad2,
+  Heart,
+  LoaderCircle,
+  Pause,
+  Play,
+  RotateCcw,
+  Shield,
+  Timer,
+} from "lucide-react";
 import { coinPositions, type LevelState } from "../game/level";
+import { clockLabel, initialLevel, type EditorReward } from "../game/rules";
+import { subscribeEditorRewards } from "../game/editorBridge";
 
 type Controller = ReturnType<typeof import("../game/createGame").createGame>;
 
@@ -9,14 +21,29 @@ export default function GamePanel() {
   const controller = useRef<Controller | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
-  const [state, setState] = useState<LevelState>({
-    status: "ready",
-    coins: 0,
-    totalCoins: coinPositions.length,
-    defeated: 0,
-  });
+  const [bridgeError, setBridgeError] = useState("");
+  const [state, setState] = useState<LevelState>(() =>
+    initialLevel(coinPositions.length),
+  );
   useEffect(() => {
     let disposed = false;
+    let cleanupRewards: (() => void) | undefined;
+    const pending: EditorReward[] = [];
+    subscribeEditorRewards((reward) => {
+      if (disposed) return;
+      if (controller.current) controller.current.reward(reward);
+      else pending.push(reward);
+    })
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else cleanupRewards = cleanup;
+      })
+      .catch((e) => {
+        if (!disposed)
+          setBridgeError(
+            `No se pudieron conectar las recompensas: ${String(e)}`,
+          );
+      });
     import("../game/createGame")
       .then(({ createGame }) => {
         if (disposed || !host.current) return;
@@ -26,12 +53,15 @@ export default function GamePanel() {
             setState(next);
           }
         });
+        for (const reward of pending.splice(0))
+          controller.current.reward(reward);
       })
       .catch((e) => {
         if (!disposed) setError(String(e));
       });
     return () => {
       disposed = true;
+      cleanupRewards?.();
       controller.current?.destroy();
       controller.current = null;
     };
@@ -53,15 +83,15 @@ export default function GamePanel() {
         <div>
           <h3>El próximo salto es tuyo.</h3>
           <p>
-            Juntá monedas, saltá sobre los bichos y llegá a la bandera. Tu
-            exportación sigue en marcha.
+            Cada corte suma. Juntá monedas, vencé a los bichos y llegá a la
+            bandera con tus tres vidas.
           </p>
         </div>
         <div className="game-stats">
           <span>
-            Monedas{" "}
+            Monedas del nivel{" "}
             <strong>
-              {state.coins}/{state.totalCoins}
+              {state.collectedCoins}/{state.totalCoins}
             </strong>
           </span>
           <span>
@@ -69,6 +99,31 @@ export default function GamePanel() {
           </span>
         </div>
       </div>
+      <div className="reward-strip" aria-live="polite">
+        <Shield size={15} />
+        {state.lastReward ? (
+          <span>
+            <strong>
+              {state.lastReward.kind === "effect"
+                ? "Efectos aplicados"
+                : "Video exportado"}
+            </strong>{" "}
+            · +{state.lastReward.points} puntos · +{state.lastReward.coins}{" "}
+            moneda{state.lastReward.coins > 1 ? "s" : ""} · escudo de{" "}
+            {state.lastReward.shieldSeconds} s de juego
+          </span>
+        ) : (
+          <span>
+            Aplicá efectos: +100 puntos, +1 moneda y escudo. Exportá: +500
+            puntos, +5 monedas y escudo.
+          </span>
+        )}
+      </div>
+      {bridgeError && (
+        <p className="game-bridge-error" role="alert">
+          {bridgeError}
+        </p>
+      )}
       <div className="game-stage">
         <div
           ref={host}
@@ -78,6 +133,53 @@ export default function GamePanel() {
           role="application"
           aria-label="Nivel 1. Flechas o A y D para caminar; espacio, W o flecha arriba para saltar. P para pausar. R para reiniciar."
         />
+        <div className="game-hud" role="group" aria-label="HUD del juego">
+          <div>
+            <span>PUNTAJE</span>
+            <strong data-hud="score">
+              {state.score.toString().padStart(6, "0")}
+            </strong>
+          </div>
+          <div>
+            <span>
+              <Heart size={12} /> VIDAS
+            </span>
+            <strong data-hud="lives">
+              {state.lives}
+              <small aria-hidden="true">
+                {"♥".repeat(state.lives)}
+                {"♡".repeat(3 - state.lives)}
+              </small>
+            </strong>
+          </div>
+          <div>
+            <span>
+              <Coins size={12} /> MONEDAS
+            </span>
+            <strong data-hud="coins">
+              {state.coins}
+              <small>+{state.bonusCoins} del editor</small>
+            </strong>
+          </div>
+          <div className={state.timeLeft <= 30 ? "time-low" : ""}>
+            <span>
+              <Timer size={12} /> TIEMPO
+            </span>
+            <strong data-hud="time">{clockLabel(state.timeLeft)}</strong>
+          </div>
+          <div
+            className={`hud-shield ${state.shieldSeconds > 0 ? "active" : ""}`}
+          >
+            <span>
+              <Shield size={12} /> ESCUDO
+            </span>
+            <strong data-hud="shield">
+              {state.shieldSeconds > 0
+                ? `${Math.ceil(state.shieldSeconds)} s`
+                : "—"}
+            </strong>
+          </div>
+        </div>
         {(!loaded || state.status !== "running") && (
           <div className="game-overlay">
             {!loaded && !error ? (
@@ -92,35 +194,43 @@ export default function GamePanel() {
                   ? "Preparando el sendero…"
                   : state.status === "won"
                     ? "¡Llegaste al último corte!"
-                    : state.status === "lost"
-                      ? "Un salto más. Un nuevo intento."
-                      : state.status === "paused"
-                        ? "El sendero te espera."
-                        : "Una pequeña aventura entre cortes."}
+                    : state.status === "respawning"
+                      ? `Un respiro. Te quedan ${state.lives} vidas.`
+                      : state.status === "lost"
+                        ? "Sin vidas. Una nueva aventura."
+                        : state.status === "paused"
+                          ? "El sendero te espera."
+                          : "Una pequeña aventura entre cortes."}
             </h3>
             <p>
               {error ||
                 (state.status === "won"
-                  ? `Conseguiste ${state.coins} de ${state.totalCoins} monedas y venciste a ${state.defeated} enemigos.`
-                  : state.status === "lost"
-                    ? "Evitá los pozos y los enemigos. Saltá sobre ellos para vencerlos."
-                    : "Flechas o A / D para moverte · Espacio, W o ↑ para saltar.")}
+                  ? `${state.score} puntos · ${state.collectedCoins}/${state.totalCoins} monedas del nivel · ${state.defeated} enemigos vencidos.`
+                  : state.status === "respawning"
+                    ? `${state.lastDeath === "timeout" ? "Se terminó el tiempo." : state.lastDeath === "fall" ? "Cuidado con los pozos." : "Probá saltar sobre el enemigo."} Vas a reaparecer ${state.checkpoint ? "en la posta intermedia" : "al comienzo"}, con tres minutos.`
+                    : state.status === "lost"
+                      ? "Reiniciá el nivel con tres vidas. Tus recompensas de edición se conservan durante esta sesión."
+                      : "Flechas o A / D para moverte · Espacio, W o ↑ para saltar.")}
             </p>
             {loaded && !error && (
               <button
                 className="primary"
                 onClick={() =>
-                  state.status === "won" || state.status === "lost"
-                    ? controller.current?.restart()
-                    : controller.current?.play()
+                  state.status === "respawning"
+                    ? controller.current?.respawn()
+                    : state.status === "won" || state.status === "lost"
+                      ? controller.current?.restart()
+                      : controller.current?.play()
                 }
               >
                 <Play size={16} />
-                {state.status === "won" || state.status === "lost"
-                  ? "Volver a jugar"
-                  : state.status === "paused"
-                    ? "Continuar"
-                    : "Empezar aventura"}
+                {state.status === "respawning"
+                  ? "Reaparecer"
+                  : state.status === "won" || state.status === "lost"
+                    ? "Volver a jugar"
+                    : state.status === "paused"
+                      ? "Continuar"
+                      : "Empezar aventura"}
               </button>
             )}
           </div>

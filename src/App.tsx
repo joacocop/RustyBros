@@ -334,7 +334,7 @@ export default function App() {
           <span>Sin título</span>
         </div>
         <span className="build-tag">
-          EDITÁ Y JUGÁ <span>01—07</span>
+          EDITÁ Y JUGÁ <span>01—10</span>
         </span>
       </header>
 
