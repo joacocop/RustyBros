@@ -23,7 +23,7 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [[test]]
 name = "processing"
-path = "src/processing.rs"
+path = "tests/processing.rs"
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }

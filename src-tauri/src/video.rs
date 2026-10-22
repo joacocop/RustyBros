@@ -9,7 +9,7 @@ use tauri::Manager;
 pub struct VideoMetadata {
     path: String,
     name: String,
-    duration: f64,
+    pub(crate) duration: f64,
     width: u64,
     height: u64,
     fps: f64,
@@ -21,6 +21,26 @@ pub struct VideoMetadata {
 
 #[derive(Default)]
 pub struct MediaStore(Mutex<HashMap<String, VideoMetadata>>);
+
+impl MediaStore {
+    pub(crate) fn video(&self, path: &str) -> Result<VideoMetadata, String> {
+        self.0
+            .lock()
+            .map_err(|_| "No se pudo acceder a la biblioteca.")?
+            .get(path)
+            .cloned()
+            .ok_or_else(|| "Primero importá el archivo.".into())
+    }
+    pub(crate) fn paths(&self) -> Result<Vec<String>, String> {
+        Ok(self
+            .0
+            .lock()
+            .map_err(|_| "No se pudo acceder a la biblioteca.")?
+            .keys()
+            .cloned()
+            .collect())
+    }
+}
 
 #[derive(Serialize)]
 pub struct ProcessedPreview {

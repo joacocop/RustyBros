@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import ExportPanel from "./components/ExportPanel";
+import GamePanel from "./components/GamePanel";
 import {
   ArrowDownToLine,
   ArrowUpRight,
@@ -135,6 +137,7 @@ export default function App() {
       const target = event.target as HTMLElement;
       if (
         event.code === "Space" &&
+        !target.closest("[data-game]") &&
         !["INPUT", "BUTTON", "SELECT", "TEXTAREA"].includes(target.tagName)
       ) {
         event.preventDefault();
@@ -331,7 +334,7 @@ export default function App() {
           <span>Sin título</span>
         </div>
         <span className="build-tag">
-          PRIMER CORTE <span>01—04</span>
+          EDITÁ Y JUGÁ <span>01—07</span>
         </span>
       </header>
 
@@ -462,14 +465,21 @@ export default function App() {
                 </div>
               )}
             </div>
-            <div className="game-teaser">
+            <button
+              className="game-teaser"
+              onClick={() =>
+                document
+                  .getElementById("game")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+            >
               <Gamepad2 size={21} />
               <div>
                 <strong>Editá. Jugá. Repetí.</strong>
-                <span>El modo juego llega pronto.</span>
+                <span>El sendero te espera.</span>
               </div>
-              <span className="soon">PRONTO</span>
-            </div>
+              <span className="soon">JUGAR</span>
+            </button>
           </aside>
 
           <section className="panel preview-panel">
@@ -819,31 +829,14 @@ export default function App() {
             </div>
           </section>
 
-          <aside className="panel export-panel">
-            <div className="panel-heading">
-              <h2>
-                <ArrowUpRight size={16} /> Exportación
-              </h2>
-              <span className="soon">RB5</span>
-            </div>
-            <div className="export-content">
-              <div className="export-summary">
-                <span className="export-format">MP4</span>
-                <div>
-                  <strong>Tu historia, lista para salir.</strong>
-                  <p>
-                    Formato, calidad y resolución
-                    <br />
-                    en la próxima etapa.
-                  </p>
-                </div>
-              </div>
-              <button disabled className="export-button">
-                <ArrowUpRight size={16} /> Exportar video <span>PRONTO</span>
-              </button>
-            </div>
-          </aside>
+          <ExportPanel
+            media={media}
+            trim={trim}
+            effects={effects}
+            busy={!!busy}
+          />
         </div>
+        <GamePanel />
         <footer>
           <span className="footer-notice" role="status">
             <span className="status-dot" />
